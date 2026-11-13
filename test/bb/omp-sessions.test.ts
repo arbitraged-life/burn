@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakePluginHost, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPiSessions } from "../../extensions/bb/host/pi-sessions.js";
 import { createHostEntry } from "../../extensions/bb/host/entry.js";
 import { createReportSource } from "../../extensions/bb/sources.js";
@@ -133,6 +133,69 @@ describe("OMP session accounting", () => {
       rmSync(path);
       await harness.behavior.emitThreadEvent("experimental_thread.events", { thread, sequence: 11 });
       expect((await source.reportsOf([thread.id])).get(thread.id)?.report.cost.total).toBe(7);
+    } finally {
+      source.dispose();
+      await host.experimental_dispose();
+      await harness.lifecycle.dispose();
+    }
+  });
+
+  it("discovers an OMP identity recorded after the first active-thread read", async () => {
+    const s = setup();
+    s.write(A, [user("inspect"), assistant(2)]);
+    const thread = makeThreadResponse({ id: "thr_aaaaaaaa", providerId: "acp-omp", environmentId: "env_1", status: "active" });
+    const rows = [requestEvent(thread.id, "inspect", "p/m1"), costEvent(thread.id, 1, "USD", A)];
+    const host = experimental_createHostEntryHarness(createHostEntry({ dir: join(s.dir, "pi"), ompDir: s.dir }));
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "burn",
+      sdk: {
+        threads: { get: async () => thread, events: { list: listEvents(() => rows) } },
+        environments: { get: async () => ({ id: "env_1", hostId: "host_1" }) },
+        hosts: { list: async () => [{ id: "host_1", status: "connected" }] },
+      },
+      experimental_callHostRpc: ({ method, input }) => host.experimental_call(method as "reports", input as never),
+    });
+    const source = createReportSource(bb, { onChange: () => {}, retryMs: 10 });
+    try {
+      expect((await source.reportsOf([thread.id])).get(thread.id)).toMatchObject({
+        source: "events", report: { calls: 0, cost: { total: 1 }, coverage: "partial" },
+      });
+      rows.push(identityEvent(thread.id, A));
+      await vi.waitFor(async () => {
+        expect((await source.reportsOf([thread.id])).get(thread.id)).toMatchObject({
+          source: "log", report: { calls: 1, tokens: { input: 100, output: 50 }, cost: { total: 2 } },
+        });
+      });
+    } finally {
+      source.dispose();
+      await host.experimental_dispose();
+      await harness.lifecycle.dispose();
+    }
+  });
+
+  it("updates OMP fallback costs on usage events while native logs are unavailable", async () => {
+    const s = setup();
+    const thread = makeThreadResponse({ id: "thr_aaaaaaaa", providerId: "acp-omp", environmentId: "env_1", status: "active" });
+    const rows = [identityEvent(thread.id, A), requestEvent(thread.id, "inspect", "p/m1"), costEvent(thread.id, 1, "USD", A)];
+    const host = experimental_createHostEntryHarness(createHostEntry({ dir: join(s.dir, "pi"), ompDir: s.dir }));
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "burn",
+      sdk: {
+        threads: { get: async () => thread, events: { list: listEvents(() => rows) } },
+        environments: { get: async () => ({ id: "env_1", hostId: "host_1" }) },
+        hosts: { list: async () => [{ id: "host_1", status: "connected" }] },
+      },
+      experimental_callHostRpc: ({ method, input }) => host.experimental_call(method as "reports", input as never),
+    });
+    const source = createReportSource(bb, { onChange: () => {} });
+    try {
+      expect((await source.reportsOf([thread.id])).get(thread.id)?.report.cost.total).toBe(1);
+      const update = costEvent(thread.id, 3, "USD", A);
+      rows.push(update);
+      await harness.behavior.emitThreadEvent("experimental_thread.events", { thread, sequence: update.seq });
+      expect((await source.reportsOf([thread.id])).get(thread.id)).toMatchObject({
+        source: "events", report: { calls: 0, cost: { total: 3 }, coverage: "partial" },
+      });
     } finally {
       source.dispose();
       await host.experimental_dispose();

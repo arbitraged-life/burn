@@ -388,7 +388,7 @@ describe("where the chip shows", () => {
   it("stays the full chip in the context row off a phone when there is no footer", async () => {
     const slot = await renderChip(backend());
     const pill = await chipButton(slot);
-    expect(pill.textContent).toBe("$4.82");
+    await vi.waitFor(() => expect(pill.textContent).toBe("$4.82"));
     expect(slot.container.contains(pill)).toBe(true);
   });
 

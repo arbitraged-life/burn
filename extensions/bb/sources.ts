@@ -12,7 +12,7 @@ import { logKey } from "./keys.js";
 import { usageReportSchema } from "./schema.js";
 
 const FACTS_TTL_MS = 5 * 60_000;
-/** A thread whose pi session id bb has not named yet is looked up again this soon, not after the full facts TTL. */
+/** A thread whose pi or OMP session id bb has not named yet is looked up again this soon, not after the full facts TTL. */
 const FACTS_RETRY_MS = 5_000;
 /** Consecutive retries before a thread with no session identity settles on the normal facts TTL. */
 const FACTS_RETRY_MAX = 12;
@@ -337,8 +337,8 @@ export function createReportSource(
   }
 
   /**
-   * A new thread's pi session file is named after a session id bb may not have recorded yet.
-   * Until it has, the host watch cannot match the file to the thread, so look again soon and tell the UI to reread.
+   * A new pi or OMP thread may not have a session identity yet.
+   * Retry soon so its native logs replace provisional or fallback figures.
    */
   function scheduleRetry(threadId: string): void {
     if (retryTimers.has(threadId)) return;
@@ -444,9 +444,9 @@ export function createReportSource(
       }
       // Ended by forget or dispose: keep nothing, schedule nothing, and give the callers no machine to ask.
       if (!live()) return { at: now(), hostId: null, providerId: found.providerId, sessionIds: [], stems: new Set() };
+      const reader = found.providerId === null ? null : harnessOf(found.providerId).reader;
       const provisional =
-        found.providerId !== null &&
-        harnessOf(found.providerId).reader === "pi-log" &&
+        (reader === "pi-log" || reader === "omp-log") &&
         found.sessionIds.length === 1 &&
         found.sessionIds[0] === threadId;
       // A thread that started again during the last try may have a session this lookup missed; the next read looks again.
@@ -625,8 +625,10 @@ export function createReportSource(
   for (const name of ["thread.idle", "thread.failed"] as const) bb.events.on(name, ({ thread }) => heardStatus(thread));
   // BB records events at most once a second; refresh readers without a filesystem watch while they work.
   bb.events.on("experimental_thread.events", ({ thread }) => {
-    if (!["opencode-db", "claude-log", "omp-log"].includes(harnessOf(thread.providerId).reader)) return;
+    const reader = harnessOf(thread.providerId).reader;
+    if (reader !== "opencode-db" && reader !== "claude-log" && reader !== "omp-log") return;
     invalidate(thread.id);
+    if (reader === "omp-log") events.invalidate(thread.id);
     opts.onChange([thread.id]);
   });
 
