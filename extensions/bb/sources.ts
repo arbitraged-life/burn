@@ -558,9 +558,12 @@ export function createReportSource(
       failures.delete(hostId);
       for (const { threadId, report, at } of answer.reports) {
         let got: LogReport | null = report !== null && at !== null ? { report, at, source: "log" } : null;
+        let preserveKept = false;
         if (gen === priceGeneration && (harness === "claude" || harness === "omp") && got?.report.coverage === "partial") {
           const kept = await lastKept(threadId);
           if (kept && kept.report.coverage !== "partial") {
+            // This warning describes the current read, not the complete durable snapshot.
+            preserveKept = true;
             got = {
               ...kept,
               report: {
@@ -573,7 +576,7 @@ export function createReportSource(
         }
         answers.set(threadId, got);
         if (gen === priceGeneration && (versions.get(threadId) ?? 0) === seen.get(threadId)) remember(reports, threadId, { got, checkedAt }, REPORTS_MAX);
-        if (got) await save(threadId, got, gen);
+        if (got && !preserveKept) await save(threadId, got, gen);
       }
     }
   }

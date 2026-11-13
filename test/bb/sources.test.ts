@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExperimentalHostWatchListener } from "@get-bb/plugin-sdk";
@@ -1187,16 +1187,71 @@ describe("Claude transcript source selection", () => {
   });
 });
 
-it("preserves a saved Claude report when a later read has missing session identities", async () => {
-  const opts: { coverageNote?: string } = {};
-  const s = setup({ [id(1)]: { host: A, provider: "claude-code" } }, opts);
-  s.costs[id(1)] = 4;
-  expect(await s.cost(id(1))).toEqual([4]);
-  opts.coverageNote = "Partial Claude transcript history: missing session";
-  s.costs[id(1)] = 2;
-  s.tick(60_000);
-  const got = (await s.source.reportsOf([id(1)])).get(id(1));
-  expect(got?.report.cost.total).toBe(4);
-  expect(got?.report.coverageNote).toContain("last saved");
-  await s.harness.lifecycle.dispose();
+it.each(["omp", "claude"] as const)("preserves a complete %s snapshot across reload and repeated partial-history reads", async (kind) => {
+  const dir = mkdtempSync(join(tmpdir(), "burn-saved-history-"));
+  dirs.push(dir);
+  const project = join(dir, "project");
+  mkdirSync(project);
+  const sessionIds = ["01a1d655-af5e-776d-921a-f1c8a816886d", "01a1d655-af5e-776d-921a-f1c8a816886e"];
+  const timestamp = "2026-10-18T12:00:00.000Z";
+  const files = sessionIds.map((sessionId, index) => {
+    const entries = kind === "omp"
+      ? [{ type: "session", version: 3, id: sessionId, timestamp }, user(), assistant(index + 1)]
+      : [{
+        type: "assistant", timestamp, sessionId,
+        message: { id: `message-${sessionId}`, model: "claude-opus-5-5", usage: { input_tokens: 100, output_tokens: 50 } },
+      }];
+    const path = join(project, kind === "omp" ? `2026-10-18T12-00-00-000Z_${sessionId}.jsonl` : `${sessionId}.jsonl`);
+    const content = entries.map((entry) => JSON.stringify(entry) + "\n").join("");
+    writeFileSync(path, content);
+    const modified = new Date(Date.parse(timestamp) + index * 1000);
+    utimesSync(path, modified, modified);
+    return { path, content };
+  });
+  const thread = makeThreadResponse({ id: id(8), providerId: kind === "omp" ? "acp-omp" : "claude-code", environmentId: "env_1", status: "active" });
+  const identities = sessionIds.map((providerThreadId, index) => ({
+    type: "thread/identity", threadId: thread.id, seq: index + 1, data: { providerThreadId },
+  }) as unknown as EventRow);
+  const host = experimental_createHostEntryHarness(createHostEntry({ dir: join(dir, "pi"), ompDir: dir, claudeDir: dir }));
+  const { bb, harness } = createFakePluginHost({
+    pluginId: "burn",
+    sdk: {
+      threads: { get: async () => thread, events: { list: listEvents(() => identities) } },
+      environments: { get: async () => ({ id: "env_1", hostId: "host_1" }) },
+      hosts: { list: async () => [{ id: "host_1", status: "connected" }] },
+    },
+    experimental_callHostRpc: ({ method, input }) => host.experimental_call(method as "reports", input as never),
+  });
+  let source = createReportSource(bb, { onChange: () => {} });
+  try {
+    const complete = (await source.reportsOf([thread.id])).get(thread.id)!;
+    expect(complete.report).toMatchObject({ calls: 2, tokens: { input: 200, output: 100 } });
+    expect(complete.report.coverage).not.toBe("partial");
+    const snapshot = structuredClone(await bb.storage.kv.get(`log:${thread.id}`));
+    expect(snapshot).toEqual({ report: complete.report, at: complete.at });
+
+    source.dispose();
+    rmSync(files[1]!.path);
+    source = createReportSource(bb, { onChange: () => {} });
+    for (const sequence of [10, 11]) {
+      await harness.behavior.emitThreadEvent("experimental_thread.events", { thread, sequence });
+      const got = (await source.reportsOf([thread.id])).get(thread.id);
+      expect.soft(got).toEqual({
+        ...complete,
+        report: { ...complete.report, coverage: "partial", coverageNote: expect.stringContaining("last saved") },
+      });
+      expect.soft(await bb.storage.kv.get(`log:${thread.id}`)).toEqual(snapshot);
+    }
+
+    writeFileSync(files[1]!.path, files[1]!.content);
+    await harness.behavior.emitThreadEvent("experimental_thread.events", { thread, sequence: 12 });
+    const recovered = (await source.reportsOf([thread.id])).get(thread.id)!;
+    expect(recovered.report).toEqual(complete.report);
+    expect(recovered.at).not.toBe(complete.at);
+    expect(await bb.storage.kv.get(`log:${thread.id}`)).toEqual({ report: recovered.report, at: recovered.at });
+  } finally {
+    source.dispose();
+    await host.experimental_dispose();
+    await harness.lifecycle.dispose();
+  }
 });

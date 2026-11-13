@@ -15,6 +15,7 @@ Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on a
 - Resolve duplicate OMP session files by complete parsed history, then modification time, rather than pathname order. A stale copy no longer hides new calls and tokens appended to the active log, including when retained histories reach the entry cap.
 - Clarify that Calls counts model requests rather than tool executions, and include OMP in timing coverage.
 - Retry late OMP session identities without waiting for the five-minute facts cache, and refresh cost-only fallback reports on usage events while native logs are unavailable.
+- Preserve the last complete OMP or Claude accounting snapshot across plugin reloads when session files are missing. Partial-history warnings affect only the displayed report; repeated refreshes keep the durable totals intact, and complete reads resume normal persistence.
 
 ## 0.9.4 - 2026-11-06
 
