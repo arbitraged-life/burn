@@ -4,6 +4,12 @@ See what each agent thread has cost, while it runs.
 
 Burn puts a cost pill such as `$4.82 +$0.31` in pi's footer and in bb's prompt box: the thread's total, then what the last prompt added. Behind the pill is what every prompt, model and call cost, budgets that warn you before a thread gets expensive, and your spend across every thread.
 
+## Maintained fork
+
+The `personal` branch in [arbitraged-life/burn](https://github.com/arbitraged-life/burn) is our BB plugin source. It combines the OMP accounting correction ([upstream PR #13](https://github.com/kalindudc/burn/pull/13)) and optional CodeBurn integration ([upstream PR #14](https://github.com/kalindudc/burn/pull/14)). Those contribution branches remain separate; using this fork does not depend on upstream accepting them.
+
+Install the reviewed fork revision, not the catalogue's upstream range. The branch command below follows `personal`; replace `personal` with a reviewed commit SHA to pin an installation. Changing an already-installed managed Git source requires BB's remove/reinstall flow: back up its settings and persistent plugin storage first. Burn keeps the same plugin ID and storage format. The standalone `codeburn` BB plugin is no longer needed once **Machine usage** is verified; keep the CodeBurn CLI, configuration, logs and caches.
+
 <p align="center">
   <img src="assets/screenshots/bb-chip-card.png" alt="The Burn card in bb, opened from the cost chip under the prompt box" width="760">
 </p>
@@ -43,7 +49,7 @@ The bb plugin alone is enough in bb. The pi extension is optional: it adds the p
 
 ```bash
 # bb plugin
-bb plugin install git:https://github.com/kalindudc/burn
+bb plugin install git:https://github.com/arbitraged-life/burn.git@personal
 
 # pi extension
 pi install git:github.com/kalindudc/burn
@@ -52,13 +58,13 @@ pi install git:github.com/kalindudc/burn
 From a local checkout instead:
 
 ```bash
-git clone https://github.com/kalindudc/burn && cd burn
+git clone --branch personal https://github.com/arbitraged-life/burn.git && cd burn
 npm ci --ignore-scripts
 bb plugin install path:"$PWD"
 pi install "$PWD"
 ```
 
-To update, run `bb plugin update burn` and `pi update git:github.com/kalindudc/burn`. A bare `pi update` updates pi itself, not its packages.
+For a branch-tracking installation, run `bb plugin update burn`. A commit-pinned installation stays pinned until explicitly replaced with another reviewed revision. The optional pi commands above continue to use upstream; `pi update git:github.com/kalindudc/burn` updates that package, while a bare `pi update` updates pi itself.
 
 Requirements: bb 0.49 or newer. Machine usage additionally requires the standalone CodeBurn CLI 0.9.28 or newer on the selected machine; it is optional and is not installed by Burn. The pi extension needs pi 1.x, which provides `ctx.mode`.
 

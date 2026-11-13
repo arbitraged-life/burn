@@ -108,7 +108,7 @@ export const SETTINGS = {
     type: "string",
     label: "Price overrides (JSON)",
     description:
-      "Rates in dollars per million tokens for models the built-in list does not price, such as router aliases or contract rates: {\"model-id\": {\"input\": 3, \"output\": 15, \"cacheRead\": 0.3, \"cacheWrite\": 3.75}}. Cache reads and writes default to 0. An override replaces that model's built-in row, including any long-context tier. Applies to Claude Code and Codex threads, whose tokens Burn prices; pi and OpenCode threads use the cost their harness recorded.",
+      "Rates in dollars per million tokens for models the built-in list does not price, such as router aliases or contract rates: {\"model-id\": {\"input\": 3, \"output\": 15, \"cacheRead\": 0.3, \"cacheWrite\": 3.75}}. Cache reads and writes default to 0. An override replaces that model's built-in row, including any long-context tier. Applies to Claude Code and Codex threads, whose tokens Burn prices; pi, OMP and OpenCode threads use the cost their harness recorded.",
     default: "",
     experimental_multiline: true,
     experimental_schema: z
@@ -120,7 +120,7 @@ export const SETTINGS = {
     type: "number",
     label: "Discount (%)",
     description:
-      "Percent off list price for every cost Burn shows, budgets included. 16 means you pay 84% of list price. 0 means list price; a negative number, such as -10, adds 10%.",
+      "Percent off BB-thread costs, budgets included; not CodeBurn machine usage. 16 means you pay 84% of list price. 0 means list price; a negative number, such as -10, adds 10%.",
     default: 0,
     experimental_schema: discountSetting,
   },
