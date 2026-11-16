@@ -37,7 +37,7 @@ The plugin gives pi an address through the `BURN_BB_URL` environment variable. p
 
 The figures still come from the session log. The report adds only what the log cannot know: the budget set with `/burn budget`, when pi stopped a run, and the context window.
 
-The plugin's reply carries the thread's budget policy, so pi in a bb thread follows bb's budget settings. A thread budget set in bb takes precedence over one set with `/burn budget`. With the pi extension installed, pi stops a run at its budget from inside pi, which is faster than stopping it through bb.
+The plugin's reply carries the thread's budget policy, so pi in a bb thread follows bb's budget settings. A thread budget set in bb takes precedence over one set with `/burn budget`. For a thread-only budget with the pi extension installed, pi stops a run at its budget from inside pi, which is faster than stopping it through bb. An opt-in budget that includes children is enforced by bb instead: the plugin combines the reports for the whole family and stops its running threads when that total crosses the budget. The policy tells pi to leave shared-budget enforcement to bb, because pi cannot see sibling spending.
 
 bb gives pi the address to report to only when it starts a pi session. So after you install the pi extension, a thread that was already running starts reporting only after it restarts. Its cost shows in bb either way, from the session log.
 

@@ -6,6 +6,8 @@ Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on a
 
 ## Unreleased
 
+- Add opt-in **Include child threads** to each bb thread budget. It counts all descendants and workflow-owned workers for budget status and alerts; with the existing stop setting enabled, a crossing stops the running family through bb. Thread-only budgets and stopping defaults are unchanged. Shared budgets use discounted spending, survive reloads, and do not double-count native subagent usage or Burn-page totals. As with thread-only budgets, concurrent calls may overshoot, Claude Code threads are not stopped, and another prompt can continue.
+
 - Read OpenCode 2 session messages and child sessions, while retaining the older schema as a per-session fallback. Include compaction usage and failed calls without token counts.
 
 ## 0.9.4 - 2026-11-06

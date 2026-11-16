@@ -308,7 +308,7 @@ export function BurnCard({ answer, threadId, defaultBudget, discounted, now, onO
             <div className="mt-1 text-[11px] text-muted-foreground tabular-nums" data-testid="agents-line">
               Subagents · {agentLabel(report.agents)}
             </div>
-            {isTokenOnly(report) ? null : <BudgetStatus cost={report.cost.total} budget={budget} onSet={() => setEditing(true)} />}
+            {isTokenOnly(report) ? null : <BudgetStatus cost={budget?.includeChildren ? answer!.family.total : report.cost.total} budget={budget} onSet={() => setEditing(true)} />}
             {report.stoppedAt !== null ? (
               <div className="mt-2">
                 <StoppedNotice stoppedAt={report.stoppedAt} budget={budget} />
