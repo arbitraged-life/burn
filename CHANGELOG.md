@@ -10,6 +10,10 @@ Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on a
 - **Request-driven CLI access.** CodeBurn 0.9.28+ is an optional executable on the selected connected machine. Saved visibility fails closed; mutations require short-lived, executable-bound confirmation; exports are bounded and cleaned on release or disposal. No companion, periodic collector, implicit Cursor sync or sharing service is installed or started.
 - **Current BB APIs.** Requires BB 0.49 / plugin SDK 0.6.132. The chip's non-footer fallback uses the native thread context row, and the Burn side panel uses the current action-tab API. Existing thread-spend URLs remain valid.
 
+- Add opt-in **Include child threads** to each bb thread budget. It counts all descendants and workflow-owned workers for budget status and alerts; with the existing stop setting enabled, a crossing stops the running family through bb. Thread-only budgets and stopping defaults are unchanged. Shared budgets use discounted spending, survive reloads, and do not double-count native subagent usage or Burn-page totals. As with thread-only budgets, concurrent calls may overshoot, Claude Code threads are not stopped, and another prompt can continue.
+
+- Read OpenCode 2 session messages and child sessions, while retaining the older schema as a per-session fallback. Include compaction usage and failed calls without token counts.
+
 ## 0.9.4 - 2026-11-06
 
 Burn stops asking machines that bb says are not connected, and a hidden bb window stops asking Burn for figures. A thread on a machine that bb created for it shows its cost from its first turn.
