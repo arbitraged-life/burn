@@ -1,6 +1,6 @@
 {
   "name": "burn",
-  "version": "0.9.4",
+  "version": "0.10.0",
   "description": "Thread costs, budgets and per-prompt breakdowns in pi and bb, plus optional machine-wide CodeBurn reports, settings and exports in bb.",
   "type": "module",
   "keywords": [
