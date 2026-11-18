@@ -41,7 +41,7 @@ Install the reviewed fork revision, not the catalogue's upstream range. The bran
   </tr>
 </table>
 
-**Budgets** work in both. Burn warns at 80% and at 100% of a thread's budget. It never stops a thread unless you turn on the stop setting, which is off by default.
+**Budgets** work in both. Burn warns at 80% and at 100% of a thread's budget. It never stops a thread unless you turn on the stop setting, which is off by default. In bb, **Include child threads** in the budget editor opts that budget into counting the whole family, including workflow workers; with stopping enabled, Burn stops their running work together when the combined cost crosses the limit. Existing budgets remain thread-only.
 
 ## Install
 

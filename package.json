@@ -1,6 +1,6 @@
 {
   "name": "burn",
-  "version": "0.9.4-personal.1",
+  "version": "0.10.0-personal.1",
   "description": "Thread costs, budgets and per-prompt breakdowns in pi and bb, plus optional machine-wide CodeBurn reports, settings and exports in bb.",
   "type": "module",
   "keywords": [
@@ -69,7 +69,7 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.3.0",
+    "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-coding-agent": "1.5.0",
     "@earendil-works/pi-tui": "1.3.0",
     "@get-bb/plugin-sdk": "0.6.132",

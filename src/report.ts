@@ -194,6 +194,8 @@ interface Loose {
     content?: string | Block[];
     stopReason?: string;
     durationMs?: number;
+    toolName?: string;
+    details?: { usage?: Usage };
   };
   usage?: Usage;
   provider?: string;
@@ -217,11 +219,12 @@ function classify(entry: Loose): Counted | null {
       stopReason: message.stopReason,
     };
   }
-  if (entry.type === "usage" && entry.usage) {
+  if ((entry.type === "usage" || entry.type === "model_usage") && entry.usage) {
     return { usage: entry.usage, key: `${entry.provider}/${entry.model}`, call: false };
   }
-  if (entry.type === "message" && message?.role === "toolResult" && message.usage) {
-    return { usage: message.usage, key: TOOLS_KEY, call: false };
+  if (entry.type === "message" && message?.role === "toolResult") {
+    const usage = message.usage ?? (message.toolName === "task" ? message.details?.usage : undefined);
+    if (usage) return { usage, key: TOOLS_KEY, call: false };
   }
   if ((entry.type === "compaction" || entry.type === "branch_summary") && entry.usage) {
     return { usage: entry.usage, key: TOOLS_KEY, call: false };
@@ -307,7 +310,7 @@ export function slimEntry(entry: unknown): EntryLike | null {
   const slim: Loose & EntryLike = { type: entry.type, timestamp: entry.timestamp, ...(typeof entry.agentId === "string" ? { agentId: entry.agentId } : {}) };
   const usage = slimUsage(entry.usage);
   if (usage) slim.usage = usage;
-  if (entry.type === "usage") {
+  if (entry.type === "usage" || entry.type === "model_usage") {
     slim.provider = entry.provider as string;
     slim.model = entry.model as string;
   }
@@ -323,7 +326,9 @@ export function slimEntry(entry: unknown): EntryLike | null {
       // OMP records request duration in milliseconds as `duration`.
       else if (typeof entry.message.duration === "number" && Number.isFinite(entry.message.duration)) message.durationMs = entry.message.duration;
     }
-    const messageUsage = slimUsage(entry.message.usage);
+    const taskUsage = role === "toolResult" && entry.message.toolName === "task" && isRecord(entry.message.details)
+      ? entry.message.details.usage : undefined;
+    const messageUsage = slimUsage(entry.message.usage) ?? slimUsage(taskUsage);
     if (messageUsage) message.usage = messageUsage;
     if (role === "user") message.content = promptExcerpt(content);
     else if (Array.isArray(content)) {

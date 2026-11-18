@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakePluginHost, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
@@ -8,7 +9,12 @@ import { createPiSessions } from "../../extensions/bb/host/pi-sessions.js";
 import { createHostEntry } from "../../extensions/bb/host/entry.js";
 import { createReportSource } from "../../extensions/bb/sources.js";
 import { costEvent, identityEvent, listEvents, requestEvent } from "./fixtures.js";
-import { assistant, user } from "../helpers.js";
+import { assistant, usage, user } from "../helpers.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return { ...actual, readdir: vi.fn(actual.readdir) };
+});
 
 const A = "01a1d655-af5e-776d-921a-f1c8a816886d";
 const B = "01a1d655-af5e-776d-921a-f1c8a816886e";
@@ -44,6 +50,147 @@ describe("OMP session accounting", () => {
     expect(got?.coverage).not.toBe("partial");
   });
 
+  it("keeps OMP side-call and blocking-task spend when replacing a larger BB event total", async () => {
+    const s = setup();
+    const first = assistant(1);
+    const timestamp = first.timestamp;
+    s.write(A, [
+      user("delegate"),
+      first,
+      { type: "model_usage", timestamp, provider: "p", model: "side", usage: usage(0.05, { input: 5, output: 2 }) },
+      { type: "message", timestamp, message: { role: "toolResult", toolName: "task", details: { usage: usage(2, { input: 200, output: 100 }) } } },
+    ]);
+    const thread = makeThreadResponse({ id: "thr_aaaaaaaa", providerId: "acp-omp", environmentId: "env_1" });
+    const rows = [identityEvent(thread.id, A), requestEvent(thread.id, "delegate", "p/m1"), costEvent(thread.id, 3.05, "USD", A)];
+    const host = experimental_createHostEntryHarness(createHostEntry({ dir: join(s.dir, "pi"), ompDir: s.dir }));
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "burn",
+      sdk: {
+        threads: { get: async () => thread, events: { list: listEvents(() => rows) } },
+        environments: { get: async () => ({ id: "env_1", hostId: "host_1" }) },
+        hosts: { list: async () => [{ id: "host_1", status: "connected" }] },
+      },
+      experimental_callHostRpc: ({ method, input }) => host.experimental_call(method as "reports", input as never),
+    });
+    const source = createReportSource(bb, { onChange: () => {} });
+    try {
+      const got = (await source.reportsOf([thread.id])).get(thread.id);
+      expect(got?.source).toBe("log");
+      expect(got?.report.cost.total).toBeCloseTo(3.05);
+      expect(got?.report.lastTurnCost).toBeCloseTo(3.05);
+      expect(got?.report.turns[0]?.cost).toBeCloseTo(3.05);
+      expect(got?.report.tokens).toMatchObject({ input: 305, output: 152 });
+      expect(got?.report.calls).toBe(1);
+      expect(got?.report.byModel.find((row) => row.key === "p/side")?.cost).toBeCloseTo(0.05);
+      expect(got?.report.coverage).not.toBe("partial");
+    } finally {
+      source.dispose();
+      await host.experimental_dispose();
+      await harness.lifecycle.dispose();
+    }
+  });
+
+  it("refreshes a known session without directory listing permission and rediscovers a moved log", async () => {
+    const s = setup();
+    const path = s.write(A, [assistant(1)]);
+    expect((await s.report(A))?.report.cost.total).toBe(1);
+    chmodSync(s.dir, 0o100);
+    try {
+      appendFileSync(path, line(assistant(2)));
+      expect((await s.report(A))?.report.cost.total).toBe(3);
+    } finally {
+      chmodSync(s.dir, 0o700);
+    }
+    mkdirSync(join(s.dir, "moved"));
+    renameSync(path, join(s.dir, "moved", `moved_${A}.jsonl`));
+    expect((await s.report(A))?.report.cost.total).toBe(3);
+  });
+
+  it("isolates an unreadable OMP bucket from available sessions and other harnesses", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "available");
+    s.write(B, [assistant(2)], "unreadable");
+    const blocked = join(s.dir, "unreadable");
+    const pi = join(s.dir, "pi");
+    mkdirSync(pi);
+    writeFileSync(join(pi, "pi_one.jsonl"), line({ type: "session", id: "pi_one" }) + line(assistant(4)));
+    const host = experimental_createHostEntryHarness(createHostEntry({ dir: pi, ompDir: s.dir, watchWaitMs: 0 }));
+    chmodSync(blocked, 0);
+    try {
+      const got = await host.experimental_call("reports", { harness: "omp", timeZone: "UTC", threads: [{ threadId: "thr_aaaaaaaa", sessionIds: [A, B] }] });
+      expect(got.reports[0]?.report).toMatchObject({ cost: { total: 1 }, coverage: "partial" });
+      const other = await host.experimental_call("reports", { harness: "pi", timeZone: "UTC", threads: [{ threadId: "thr_bbbbbbbb", sessionIds: ["pi_one"] }] });
+      expect(other.reports[0]?.report?.cost.total).toBe(4);
+    } finally {
+      chmodSync(blocked, 0o700);
+      await host.experimental_dispose();
+    }
+  });
+
+  it("marks a stale fallback partial when its known complete original becomes unreadable", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "a-copy");
+    s.write(A, [assistant(1), assistant(2)], "z-original");
+    expect((await s.report(A))?.report.cost.total).toBe(3);
+    const original = join(s.dir, "z-original");
+    chmodSync(original, 0);
+    try {
+      const got = (await s.report(A))?.report;
+      expect(got?.cost.total).toBe(1);
+      expect(got?.coverage).toBe("partial");
+    } finally {
+      chmodSync(original, 0o700);
+    }
+    expect((await s.report(A))?.report.cost.total).toBe(3);
+  });
+
+  it("marks cold discovery partial and retries after an unreadable bucket becomes available", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "a-copy");
+    s.write(A, [assistant(1), assistant(2)], "z-original");
+    const original = join(s.dir, "z-original");
+    chmodSync(original, 0);
+    try {
+      expect((await s.report(A))?.report).toMatchObject({ cost: { total: 1 }, coverage: "partial" });
+    } finally {
+      chmodSync(original, 0o700);
+    }
+    const recovered = (await s.report(A))?.report;
+    expect(recovered?.cost.total).toBe(3);
+    expect(recovered?.coverage).not.toBe("partial");
+  });
+
+  it("does not expose a stale candidate while another bucket is still being discovered", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "a-copy");
+    s.write(A, [assistant(1), assistant(2)], "z-original");
+    let enter!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const release = new Promise<void>((resolve) => { resume = resolve; });
+    const { readdir } = await vi.importActual<typeof fs>("node:fs/promises");
+    let gated = false;
+    const spy = vi.mocked(fs.readdir).mockImplementation(async (...args) => {
+      if (args[0] === join(s.dir, "z-original") && !gated) {
+        gated = true;
+        enter();
+        await release;
+      }
+      const entries = await readdir(...args);
+      return args[0] === s.dir ? entries.sort((a, b) => a.name.toString().localeCompare(b.name.toString())) : entries;
+    });
+    const first = s.report(A);
+    try {
+      await entered;
+      expect((await s.report(A))?.report.cost.total).toBe(3);
+    } finally {
+      resume();
+      await first;
+      spy.mockRestore();
+    }
+    expect((await first)?.report.cost.total).toBe(3);
+  });
+
   it("refreshes the active original when a stale copy sorts first, without counting incomplete lines or copies twice", async () => {
     const s = setup();
     const path = s.write(A, [user("inspect"), assistant(1)]);
@@ -54,6 +201,33 @@ describe("OMP session accounting", () => {
     expect((await s.report(A))?.report.cost.total).toBe(1);
     appendFileSync(path, "\n");
     expect((await s.report(A))?.report).toMatchObject({ calls: 2, tokens: { input: 200, output: 100 }, cost: { total: 3 } });
+  });
+
+  it("discovers a fuller copy created after a warm read without rescanning on every read or counting copies twice", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const now = Date.now();
+      const s = setup();
+      const first = assistant(1);
+      s.write(A, [first]);
+      expect((await s.report(A))?.report.cost.total).toBe(1);
+      s.write(A, [first, assistant(2)], "new-bucket");
+      const initialScans = vi.mocked(fs.readdir).mock.calls.length;
+      for (const elapsed of [20_000, 40_000, 59_999]) {
+        vi.setSystemTime(now + elapsed);
+        await s.report(A);
+      }
+      expect(vi.mocked(fs.readdir).mock.calls.length).toBe(initialScans);
+      vi.setSystemTime(now + 60_000);
+      const updated = (await s.report(A))?.report;
+      expect(updated).toMatchObject({ calls: 2, cost: { total: 3 }, tokens: { input: 200, output: 100 } });
+      expect(updated?.coverage).not.toBe("partial");
+      const refreshedScans = vi.mocked(fs.readdir).mock.calls.length;
+      expect((await s.report(A))?.report.cost.total).toBe(3);
+      expect(vi.mocked(fs.readdir).mock.calls.length).toBe(refreshedScans);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("prefers more complete history over a newer copy's mtime even when retained entries are capped", async () => {
