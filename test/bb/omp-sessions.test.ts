@@ -203,6 +203,33 @@ describe("OMP session accounting", () => {
     expect((await s.report(A))?.report).toMatchObject({ calls: 2, tokens: { input: 200, output: 100 }, cost: { total: 3 } });
   });
 
+  it("discovers a fuller copy created after a warm read without rescanning on every read or counting copies twice", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const now = Date.now();
+      const s = setup();
+      const first = assistant(1);
+      s.write(A, [first]);
+      expect((await s.report(A))?.report.cost.total).toBe(1);
+      s.write(A, [first, assistant(2)], "new-bucket");
+      const initialScans = vi.mocked(fs.readdir).mock.calls.length;
+      for (const elapsed of [20_000, 40_000, 59_999]) {
+        vi.setSystemTime(now + elapsed);
+        await s.report(A);
+      }
+      expect(vi.mocked(fs.readdir).mock.calls.length).toBe(initialScans);
+      vi.setSystemTime(now + 60_000);
+      const updated = (await s.report(A))?.report;
+      expect(updated).toMatchObject({ calls: 2, cost: { total: 3 }, tokens: { input: 200, output: 100 } });
+      expect(updated?.coverage).not.toBe("partial");
+      const refreshedScans = vi.mocked(fs.readdir).mock.calls.length;
+      expect((await s.report(A))?.report.cost.total).toBe(3);
+      expect(vi.mocked(fs.readdir).mock.calls.length).toBe(refreshedScans);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("prefers more complete history over a newer copy's mtime even when retained entries are capped", async () => {
     const s = setup();
     const path = s.write(A, [assistant(1), assistant(2)]);

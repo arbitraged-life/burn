@@ -12,6 +12,7 @@ Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on a
 - Clarify that Calls counts model requests rather than tool executions, and include OMP in timing coverage.
 - Include OMP `model_usage` side calls and blocking task-result usage in all spend totals without counting supplemental usage as extra assistant calls or charging it twice.
 - Cache discovered OMP paths atomically, rediscover missing or moved logs, and isolate unreadable session buckets so they cannot stall other threads or harnesses. Incomplete discoveries and unreadable known copies remain partial; failed discovery retries instead of permanently caching a stale fallback.
+- Expire complete OMP path discovery after one minute on demand, so a fuller session copy created after a warm read is discovered even while the original file remains. Warm reads do not prolong the deadline or enumerate the history tree; duplicate copies still count once.
 
 ## 0.10.0 - 2026-11-18
 

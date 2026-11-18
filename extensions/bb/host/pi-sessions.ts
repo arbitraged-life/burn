@@ -6,6 +6,8 @@ import { buildReport, type EntryLike, forkedAt, slimEntry, type UsageReport } fr
 const NEWLINE = 0x0a;
 const CHUNK_BYTES = 1024 * 1024;
 const FILES_MAX = 1000;
+/** Expire discovery on the next read after a minute, without scanning on every warm read. */
+const OMP_DISCOVERY_TTL_MS = 60_000;
 /** Entries kept per log; a longer session is read from its newest entries, as opencode's reader caps its messages. */
 const ENTRIES_FILE_MAX = 50_000;
 /** Entries kept across every log, so a host with many long sessions stays bounded; an evicted log is read again when asked for. */
@@ -145,7 +147,7 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
   const files = new Map<string, FileState>();
   const busy = new Map<string, Promise<FileState | null>>();
   // Keep every known copy of an OMP identity, but do not rescan unrelated history on warm reads.
-  const ompPaths = new Map<string, string[]>();
+  const ompPaths = new Map<string, { paths: string[]; at: number }>();
   const warned = new Set<string>();
 
   function unavailable(path: string, err: unknown): boolean {
@@ -221,6 +223,7 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
 
   async function discover(ids: ReadonlySet<string>): Promise<{ found: Map<string, string[]>; incomplete: boolean }> {
     const discovered = new Map<string, string[]>();
+    const at = Date.now();
     let incomplete = false;
     try {
       const projects = await readdir(opts.dir, { withFileTypes: true });
@@ -253,7 +256,7 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
     // Never cache a partially enumerated tree: later reads must retry the inaccessible buckets.
     for (const id of ids) {
       const paths = discovered.get(id);
-      if (paths && !incomplete) ompPaths.set(id, paths);
+      if (paths && !incomplete) ompPaths.set(id, { paths, at });
       else ompPaths.delete(id);
     }
     while (ompPaths.size > FILES_MAX) {
@@ -266,14 +269,19 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
 
   async function pathsOf(ids: ReadonlySet<string>): Promise<{ paths: { path: string; id: string }[]; incomplete: boolean }> {
     if (opts.layout !== "omp") return { paths: [...ids].map((id) => ({ path: sessionFile(opts.dir, id), id })), incomplete: false };
-    const missing = new Set([...ids].filter((id) => !ompPaths.has(id)));
+    const now = Date.now();
+    const missing = new Set([...ids].filter((id) => {
+      const cached = ompPaths.get(id);
+      return !cached || now < cached.at || now - cached.at >= OMP_DISCOVERY_TTL_MS;
+    }));
     const scan = missing.size > 0 ? await discover(missing) : null;
     const paths = [...ids].flatMap((id) => {
-      const known = scan?.found.get(id) ?? ompPaths.get(id);
+      const cached = ompPaths.get(id);
+      const known = scan?.found.get(id) ?? cached?.paths;
       if (!known) return [];
-      if (ompPaths.has(id)) {
+      if (cached) {
         ompPaths.delete(id);
-        ompPaths.set(id, known);
+        ompPaths.set(id, cached);
       }
       return known.map((path) => ({ path, id }));
     });
