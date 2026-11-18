@@ -10,6 +10,12 @@ Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on a
 - Accept OMP title metadata before the session header, match exact session identities, exclude copied fork history, refresh during active turns and preserve saved figures when logs disappear.
 - Resolve duplicate OMP session files by complete parsed history, then modification time, rather than pathname order. A stale copy no longer hides new calls and tokens appended to the active log, including when retained histories reach the entry cap.
 - Clarify that Calls counts model requests rather than tool executions, and include OMP in timing coverage.
+- Include OMP `model_usage` side calls and blocking task-result usage in all spend totals without counting supplemental usage as extra assistant calls or charging it twice.
+- Cache discovered OMP paths, rediscover missing or moved logs, and isolate unreadable session buckets so they cannot stall other threads or harnesses.
+
+- Add opt-in **Include child threads** to each bb thread budget. It counts all descendants and workflow-owned workers for budget status and alerts; with the existing stop setting enabled, a crossing stops the running family through bb. Thread-only budgets and stopping defaults are unchanged. Shared budgets use discounted spending, survive reloads, and do not double-count native subagent usage or Burn-page totals. As with thread-only budgets, concurrent calls may overshoot, Claude Code threads are not stopped, and another prompt can continue.
+
+- Read OpenCode 2 session messages and child sessions, while retaining the older schema as a per-session fallback. Include compaction usage and failed calls without token counts.
 
 ## 0.9.4 - 2026-11-06
 

@@ -144,6 +144,21 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
   };
   const files = new Map<string, FileState>();
   const busy = new Map<string, Promise<FileState | null>>();
+  // Keep every known copy of an OMP identity, but do not rescan unrelated history on warm reads.
+  const ompPaths = new Map<string, string[]>();
+  const warned = new Set<string>();
+
+  function unavailable(path: string, err: unknown): boolean {
+    if (isMissing(err)) return true;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "EACCES" && code !== "EPERM") return false;
+    if (!warned.has(path)) {
+      if (warned.size >= FILES_MAX) warned.clear();
+      warned.add(path);
+      console.warn(`[burn] cannot read OMP session path ${path}: ${code}; its sessions may be unavailable`);
+    }
+    return true;
+  }
 
   /** Entries held across every file; recomputed at a keep, which runs once per file read. */
   function heldEntries(): number {
@@ -204,47 +219,83 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
     return run;
   }
 
-  async function pathsOf(ids: ReadonlySet<string>): Promise<{ path: string; id: string }[]> {
-    if (ids.size === 0) return [];
-    if (opts.layout !== "omp") return [...ids].map((id) => ({ path: sessionFile(opts.dir, id), id }));
-    const paths: { path: string; id: string }[] = [];
+  async function discover(ids: ReadonlySet<string>): Promise<void> {
+    for (const id of ids) ompPaths.delete(id);
     try {
       const projects = await readdir(opts.dir, { withFileTypes: true });
-      for (const project of projects.sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const project of projects) {
         if (!project.isDirectory()) continue;
-        let files;
+        const dir = join(opts.dir, project.name);
+        let entries;
         try {
-          files = await readdir(join(opts.dir, project.name), { withFileTypes: true });
+          entries = await readdir(dir, { withFileTypes: true });
         } catch (err) {
-          if (isMissing(err)) continue;
+          if (unavailable(dir, err)) continue;
           throw err;
         }
-        for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
+        for (const file of entries) {
           if (!file.isFile() || !file.name.endsWith(EXTENSION)) continue;
           const id = file.name.slice(file.name.lastIndexOf("_") + 1, -EXTENSION.length);
-          if (ids.has(id)) paths.push({ path: join(opts.dir, project.name, file.name), id });
+          if (!ids.has(id)) continue;
+          const paths = ompPaths.get(id) ?? [];
+          paths.push(join(dir, file.name));
+          ompPaths.set(id, paths);
         }
       }
     } catch (err) {
-      if (!isMissing(err)) throw err;
+      if (!unavailable(opts.dir, err)) throw err;
     }
-    return paths;
+    while (ompPaths.size > FILES_MAX) {
+      const oldest = ompPaths.keys().next().value;
+      if (oldest === undefined) break;
+      ompPaths.delete(oldest);
+    }
+  }
+
+  async function pathsOf(ids: ReadonlySet<string>): Promise<{ path: string; id: string }[]> {
+    if (opts.layout !== "omp") return [...ids].map((id) => ({ path: sessionFile(opts.dir, id), id }));
+    const missing = new Set([...ids].filter((id) => !ompPaths.has(id)));
+    if (missing.size > 0) await discover(missing);
+    return [...ids].flatMap((id) => {
+      const paths = ompPaths.get(id);
+      if (!paths) return [];
+      ompPaths.delete(id);
+      ompPaths.set(id, paths);
+      return paths.map((path) => ({ path, id }));
+    });
   }
 
   return {
     async reportOf(sessionIds, timeZone) {
       const foundById = new Map<string, FileState>();
       const ids = new Set(sessionIds.filter((id) => opts.layout !== "omp" || OMP_ID.test(id)));
-      for (const { path, id } of await pathsOf(ids)) {
-        const state = await refresh(path);
-        if (!state || (opts.layout === "omp" && (state.header as { id?: unknown } | null)?.id !== id)) continue;
-        const previous = foundById.get(id);
-        // A copied file may have a newer mtime but older content. Prefer complete history,
-        // using mtime only to break ties; inspect every candidate again on each refresh.
-        if (!previous || state.parsedEntries > previous.parsedEntries ||
-          (state.parsedEntries === previous.parsedEntries && state.mtimeMs > previous.mtimeMs)) {
-          foundById.set(id, state);
+      const missing = new Set<string>();
+      async function collect(paths: { path: string; id: string }[]): Promise<void> {
+        for (const { path, id } of paths) {
+          let state: FileState | null;
+          try {
+            state = await refresh(path);
+          } catch (err) {
+            if (opts.layout === "omp" && unavailable(path, err)) continue;
+            throw err;
+          }
+          if (!state || (opts.layout === "omp" && (state.header as { id?: unknown } | null)?.id !== id)) {
+            missing.add(id);
+            continue;
+          }
+          const previous = foundById.get(id);
+          // Inspect every known copy; a newer filesystem timestamp can still carry stale content.
+          if (!previous || state.parsedEntries > previous.parsedEntries ||
+            (state.parsedEntries === previous.parsedEntries && state.mtimeMs > previous.mtimeMs)) {
+            foundById.set(id, state);
+          }
         }
+      }
+      await collect(await pathsOf(ids));
+      if (opts.layout === "omp" && missing.size > 0) {
+        // A session can move between project buckets. Rediscover only identities whose path disappeared.
+        for (const id of missing) ompPaths.delete(id);
+        await collect(await pathsOf(missing));
       }
       const found = [...foundById.values()];
       if (found.length === 0) return null;
