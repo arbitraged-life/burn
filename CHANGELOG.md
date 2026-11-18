@@ -11,11 +11,22 @@ Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on a
 - Resolve duplicate OMP session files by complete parsed history, then modification time, rather than pathname order. A stale copy no longer hides new calls and tokens appended to the active log, including when retained histories reach the entry cap.
 - Clarify that Calls counts model requests rather than tool executions, and include OMP in timing coverage.
 - Include OMP `model_usage` side calls and blocking task-result usage in all spend totals without counting supplemental usage as extra assistant calls or charging it twice.
-- Cache discovered OMP paths, rediscover missing or moved logs, and isolate unreadable session buckets so they cannot stall other threads or harnesses.
+- Cache discovered OMP paths atomically, rediscover missing or moved logs, and isolate unreadable session buckets so they cannot stall other threads or harnesses. Incomplete discoveries and unreadable known copies remain partial; failed discovery retries instead of permanently caching a stale fallback.
 
-- Add opt-in **Include child threads** to each bb thread budget. It counts all descendants and workflow-owned workers for budget status and alerts; with the existing stop setting enabled, a crossing stops the running family through bb. Thread-only budgets and stopping defaults are unchanged. Shared budgets use discounted spending, survive reloads, and do not double-count native subagent usage or Burn-page totals. As with thread-only budgets, concurrent calls may overshoot, Claude Code threads are not stopped, and another prompt can continue.
+## 0.10.0 - 2026-11-18
 
-- Read OpenCode 2 session messages and child sessions, while retaining the older schema as a per-session fallback. Include compaction usage and failed calls without token counts.
+A budget in bb can now cover a whole thread family. Burn also restores usage figures for OpenCode 2 threads and prices Claude Fable 5.2 and GPT-6.1 Terra.
+
+- **Set one budget for a thread and its children.** Turn on **Include child threads** in the budget editor to count discounted spending across descendants and workflow workers without double-counting native subagent usage. Budgets remain thread-only by default. If stopping is enabled, bb stops the family's running work when the total crosses the limit, except for Claude Code threads. In-flight calls can still take spending over the limit.
+- **OpenCode 2 threads show usage again.** Burn reads the new session format, including child sessions, compaction usage, and failed calls without token counts. It falls back to the older format for sessions with no rows in the new one. ([#9](https://github.com/kalindudc/burn/issues/9), [#12](https://github.com/kalindudc/burn/pull/12))
+- **Claude Fable 5.2 and GPT-6.1 Terra now show cost.** Burn also keeps the last known prices for older Codex models that pi no longer lists. ([#15](https://github.com/kalindudc/burn/pull/15))
+- Update the Hono development dependency to 4.13.18. ([#11](https://github.com/kalindudc/burn/pull/11))
+
+### Contributors
+
+- [Jake Lancaster](https://github.com/lanjak) reported the missing OpenCode 2 usage ([#9](https://github.com/kalindudc/burn/issues/9)).
+- [Lev Kovalenko](https://github.com/levkovalenko) contributed the OpenCode 2 fix ([#12](https://github.com/kalindudc/burn/pull/12)).
+- [Nikolai Berezovskii](https://github.com/brzvsk) contributed the model pricing update ([#15](https://github.com/kalindudc/burn/pull/15)).
 
 ## 0.9.4 - 2026-11-06
 

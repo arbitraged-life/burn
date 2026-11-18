@@ -219,8 +219,9 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
     return run;
   }
 
-  async function discover(ids: ReadonlySet<string>): Promise<void> {
-    for (const id of ids) ompPaths.delete(id);
+  async function discover(ids: ReadonlySet<string>): Promise<{ found: Map<string, string[]>; incomplete: boolean }> {
+    const discovered = new Map<string, string[]>();
+    let incomplete = false;
     try {
       const projects = await readdir(opts.dir, { withFileTypes: true });
       for (const project of projects) {
@@ -230,39 +231,53 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
         try {
           entries = await readdir(dir, { withFileTypes: true });
         } catch (err) {
-          if (unavailable(dir, err)) continue;
+          if (unavailable(dir, err)) {
+            incomplete = true;
+            continue;
+          }
           throw err;
         }
         for (const file of entries) {
           if (!file.isFile() || !file.name.endsWith(EXTENSION)) continue;
           const id = file.name.slice(file.name.lastIndexOf("_") + 1, -EXTENSION.length);
           if (!ids.has(id)) continue;
-          const paths = ompPaths.get(id) ?? [];
+          const paths = discovered.get(id) ?? [];
           paths.push(join(dir, file.name));
-          ompPaths.set(id, paths);
+          discovered.set(id, paths);
         }
       }
     } catch (err) {
       if (!unavailable(opts.dir, err)) throw err;
+      incomplete = true;
+    }
+    // Never cache a partially enumerated tree: later reads must retry the inaccessible buckets.
+    for (const id of ids) {
+      const paths = discovered.get(id);
+      if (paths && !incomplete) ompPaths.set(id, paths);
+      else ompPaths.delete(id);
     }
     while (ompPaths.size > FILES_MAX) {
       const oldest = ompPaths.keys().next().value;
       if (oldest === undefined) break;
       ompPaths.delete(oldest);
     }
+    return { found: discovered, incomplete };
   }
 
-  async function pathsOf(ids: ReadonlySet<string>): Promise<{ path: string; id: string }[]> {
-    if (opts.layout !== "omp") return [...ids].map((id) => ({ path: sessionFile(opts.dir, id), id }));
+  async function pathsOf(ids: ReadonlySet<string>): Promise<{ paths: { path: string; id: string }[]; incomplete: boolean }> {
+    if (opts.layout !== "omp") return { paths: [...ids].map((id) => ({ path: sessionFile(opts.dir, id), id })), incomplete: false };
     const missing = new Set([...ids].filter((id) => !ompPaths.has(id)));
-    if (missing.size > 0) await discover(missing);
-    return [...ids].flatMap((id) => {
-      const paths = ompPaths.get(id);
-      if (!paths) return [];
-      ompPaths.delete(id);
-      ompPaths.set(id, paths);
-      return paths.map((path) => ({ path, id }));
+    const scan = missing.size > 0 ? await discover(missing) : null;
+    const paths = [...ids].flatMap((id) => {
+      const known = scan?.found.get(id) ?? ompPaths.get(id);
+      if (!known) return [];
+      if (ompPaths.has(id)) {
+        ompPaths.delete(id);
+        ompPaths.set(id, known);
+      }
+      return known.map((path) => ({ path, id }));
     });
+    return { paths, incomplete: scan?.incomplete ?? false };
   }
 
   return {
@@ -270,13 +285,17 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
       const foundById = new Map<string, FileState>();
       const ids = new Set(sessionIds.filter((id) => opts.layout !== "omp" || OMP_ID.test(id)));
       const missing = new Set<string>();
+      let unreadable = false;
       async function collect(paths: { path: string; id: string }[]): Promise<void> {
         for (const { path, id } of paths) {
           let state: FileState | null;
           try {
             state = await refresh(path);
           } catch (err) {
-            if (opts.layout === "omp" && unavailable(path, err)) continue;
+            if (opts.layout === "omp" && unavailable(path, err)) {
+              unreadable = true;
+              continue;
+            }
             throw err;
           }
           if (!state || (opts.layout === "omp" && (state.header as { id?: unknown } | null)?.id !== id)) {
@@ -291,11 +310,15 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
           }
         }
       }
-      await collect(await pathsOf(ids));
+      const initial = await pathsOf(ids);
+      unreadable ||= initial.incomplete;
+      await collect(initial.paths);
       if (opts.layout === "omp" && missing.size > 0) {
         // A session can move between project buckets. Rediscover only identities whose path disappeared.
         for (const id of missing) ompPaths.delete(id);
-        await collect(await pathsOf(missing));
+        const retried = await pathsOf(missing);
+        unreadable ||= retried.incomplete;
+        await collect(retried.paths);
       }
       const found = [...foundById.values()];
       if (found.length === 0) return null;
@@ -310,7 +333,7 @@ export function createPiSessions(opts: { dir: string; layout?: "pi" | "omp"; lim
           return cut === null ? s.entries : s.entries.filter((e) => !(Date.parse(e.timestamp) < cut));
         });
       const report = buildReport(entries, null, { timeZone });
-      if (opts.layout === "omp" && foundById.size < ids.size) {
+      if (opts.layout === "omp" && (unreadable || foundById.size < ids.size)) {
         report.coverage = "partial";
         report.coverageNote = "Partial OMP session history: some recorded sessions are unavailable.";
       }

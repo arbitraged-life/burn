@@ -17,6 +17,8 @@ Native subagents can run inside one provider session. BB workflows instead spawn
 
 For duplicate OMP session identities, Burn refreshes every discovered file and counts only one snapshot: the one with the most complete parsed entries, then the most recent modification time when counts tie. The comparison uses the full parsed-entry count before the retained-history cap. A stale known copy cannot hide appended calls merely by sorting first or having a newer filesystem timestamp, and incomplete final lines do not increase the count. Paths are rediscovered for identities not yet located or when a known file disappears; new copies of an otherwise available identity are found on the next discovery or host-worker restart.
 
+If a bucket cannot be enumerated, that discovery is partial and is not cached as complete; the next read retries it so restored permissions can reveal a fuller copy. A known unreadable candidate also makes a readable fallback partial, preserving the server's protection against replacing a complete saved report with reduced history.
+
 ## Why Codex counters need separate identities
 
 A minimal interleaving is: parent cumulative total 100, child total 80, parent cumulative total 220. Treating the child as a parent restart gives `100 + 80 + (220 - 80) = 320`. Separate counters correctly give `220 + 80 = 300`. The regression fixture covers this interleaving and a ledger reload between child and parent events.

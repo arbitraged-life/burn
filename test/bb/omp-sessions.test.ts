@@ -1,14 +1,20 @@
 import { appendFileSync, chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakePluginHost, makeThreadResponse } from "@get-bb/plugin-sdk/testing";
 import { experimental_createHostEntryHarness } from "@get-bb/plugin-sdk/testing/host";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPiSessions } from "../../extensions/bb/host/pi-sessions.js";
 import { createHostEntry } from "../../extensions/bb/host/entry.js";
 import { createReportSource } from "../../extensions/bb/sources.js";
 import { costEvent, identityEvent, listEvents, requestEvent } from "./fixtures.js";
 import { assistant, usage, user } from "../helpers.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return { ...actual, readdir: vi.fn(actual.readdir) };
+});
 
 const A = "01a1d655-af5e-776d-921a-f1c8a816886d";
 const B = "01a1d655-af5e-776d-921a-f1c8a816886e";
@@ -119,6 +125,70 @@ describe("OMP session accounting", () => {
       chmodSync(blocked, 0o700);
       await host.experimental_dispose();
     }
+  });
+
+  it("marks a stale fallback partial when its known complete original becomes unreadable", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "a-copy");
+    s.write(A, [assistant(1), assistant(2)], "z-original");
+    expect((await s.report(A))?.report.cost.total).toBe(3);
+    const original = join(s.dir, "z-original");
+    chmodSync(original, 0);
+    try {
+      const got = (await s.report(A))?.report;
+      expect(got?.cost.total).toBe(1);
+      expect(got?.coverage).toBe("partial");
+    } finally {
+      chmodSync(original, 0o700);
+    }
+    expect((await s.report(A))?.report.cost.total).toBe(3);
+  });
+
+  it("marks cold discovery partial and retries after an unreadable bucket becomes available", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "a-copy");
+    s.write(A, [assistant(1), assistant(2)], "z-original");
+    const original = join(s.dir, "z-original");
+    chmodSync(original, 0);
+    try {
+      expect((await s.report(A))?.report).toMatchObject({ cost: { total: 1 }, coverage: "partial" });
+    } finally {
+      chmodSync(original, 0o700);
+    }
+    const recovered = (await s.report(A))?.report;
+    expect(recovered?.cost.total).toBe(3);
+    expect(recovered?.coverage).not.toBe("partial");
+  });
+
+  it("does not expose a stale candidate while another bucket is still being discovered", async () => {
+    const s = setup();
+    s.write(A, [assistant(1)], "a-copy");
+    s.write(A, [assistant(1), assistant(2)], "z-original");
+    let enter!: () => void;
+    let resume!: () => void;
+    const entered = new Promise<void>((resolve) => { enter = resolve; });
+    const release = new Promise<void>((resolve) => { resume = resolve; });
+    const { readdir } = await vi.importActual<typeof fs>("node:fs/promises");
+    let gated = false;
+    const spy = vi.mocked(fs.readdir).mockImplementation(async (...args) => {
+      if (args[0] === join(s.dir, "z-original") && !gated) {
+        gated = true;
+        enter();
+        await release;
+      }
+      const entries = await readdir(...args);
+      return args[0] === s.dir ? entries.sort((a, b) => a.name.toString().localeCompare(b.name.toString())) : entries;
+    });
+    const first = s.report(A);
+    try {
+      await entered;
+      expect((await s.report(A))?.report.cost.total).toBe(3);
+    } finally {
+      resume();
+      await first;
+      spy.mockRestore();
+    }
+    expect((await first)?.report.cost.total).toBe(3);
   });
 
   it("refreshes the active original when a stale copy sorts first, without counting incomplete lines or copies twice", async () => {
