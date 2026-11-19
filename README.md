@@ -95,6 +95,27 @@ Support for OpenCode threads, which Burn reads from opencode's own database, is 
 
 Subagent accounting, which reads Claude Code transcripts and separates Codex child counters, is by [Artur Karapetyan](https://github.com/architawr) ([#2](https://github.com/kalindudc/burn/pull/2)).
 
+## Fork maintenance
+
+In `arbitraged-life/burn`, [Scheduled upstream sync](.github/workflows/upstream-sync.yml)
+checks `kalindudc/burn`'s `main` daily at 07:17 UTC and proposes updates to `personal`.
+Run it manually from the fork's Actions tab to check sooner. The workflow lives
+on the fork's default `main`; that branch hosts automation, not the maintained plugin.
+
+Only one sync PR stays open at a time. Its immutable upstream snapshot is never
+force-pushed; close it to decline that revision, or reopen it to reconsider.
+A later upstream revision can produce another proposal. The workflow validates
+the proposed merge using TypeScript and the test suite in a read-only job.
+Conflicts fail that job without changing `personal`. Follow the Actions run linked
+in the PR body for validation: token-created PRs do not trigger ordinary PR workflows.
+Manual reruns validate the open proposal against the current target revision.
+
+Review and merge sync PRs yourself. Nothing approves, merges, tags, releases,
+or updates installed plugins automatically. GitHub Actions must be enabled with
+permission to create PRs; the job requests only contents and PR write access.
+GitHub may disable scheduled workflows after 60 days of inactivity in a public
+repository; re-enable this workflow in Actions if that happens.
+
 ## License
 
 [MIT](LICENSE.md)
