@@ -1,0 +1,65 @@
+# Fork-only maintenance. Never approves, merges, tags, or deploys.
+name: Scheduled upstream sync
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: github.repository == 'arbitraged-life/burn' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      base_sha: ${{ steps.sync.outputs.base_sha }}
+      head_sha: ${{ steps.sync.outputs.head_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Propose upstream main
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: arbitraged-life/burn
+          UPSTREAM_REPO: kalindudc/burn
+          TARGET_BRANCH: personal
+        run: bash .github/scripts/upstream-sync.sh
+
+  validate:
+    needs: propose
+    if: needs.propose.outputs.head_sha != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.propose.outputs.base_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check proposed merge without updating any branch
+        env:
+          UPSTREAM_SHA: ${{ needs.propose.outputs.head_sha }}
+        run: |
+          git fetch --no-tags origin "$UPSTREAM_SHA"
+          git -c user.name='Upstream sync validation' -c user.email='sync@users.noreply.github.com' \
+            merge --no-commit --no-ff "$UPSTREAM_SHA"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - run: npm ci
+      - run: npx --no-install tsc --noEmit
+      - run: npm test
