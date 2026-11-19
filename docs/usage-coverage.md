@@ -17,7 +17,7 @@ Native subagents can run inside one provider session. BB workflows instead spawn
 
 For duplicate OMP session identities, Burn refreshes every discovered file and counts only one snapshot: the one with the most complete parsed entries, then the most recent modification time when counts tie. The comparison uses the full parsed-entry count before the retained-history cap. A stale known copy cannot hide appended calls merely by sorting first or having a newer filesystem timestamp, and incomplete final lines do not increase the count. Complete path discoveries expire after one minute, measured from the start of their scan rather than their last use. The next read rediscovers that identity, so a fuller copy created while the old file remains is eventually included without scanning on every warm read. Missing identities and disappeared known files still trigger discovery immediately; a backwards clock change also expires discovery.
 
-If a bucket cannot be enumerated, that discovery is partial and is not cached as complete; the next read retries it so restored permissions can reveal a fuller copy. A known unreadable candidate also makes a readable fallback partial, preserving the server's protection against replacing a complete saved report with reduced history.
+If a bucket cannot be enumerated, that discovery is partial and is not cached as complete; the next read retries it so restored permissions can reveal a fuller copy. A known unreadable candidate also makes a readable fallback partial. Burn shows the saved OMP report only if it recorded more spend than the partial read, so a stale copy cannot lower the total and a growing log can still increase it.
 
 ## Why Codex counters need separate identities
 

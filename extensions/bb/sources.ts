@@ -560,7 +560,7 @@ export function createReportSource(
         let got: LogReport | null = report !== null && at !== null ? { report, at, source: "log" } : null;
         if (gen === priceGeneration && (harness === "claude" || harness === "omp") && got?.report.coverage === "partial") {
           const kept = await lastKept(threadId);
-          if (kept && kept.report.coverage !== "partial") {
+          if (kept && (harness === "omp" ? kept.report.cost.total > got.report.cost.total : kept.report.coverage !== "partial")) {
             got = {
               ...kept,
               report: {

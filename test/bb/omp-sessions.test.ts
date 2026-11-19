@@ -282,6 +282,62 @@ describe("OMP session accounting", () => {
     expect((await s.report(A))?.report).toMatchObject({ calls: 1, cost: { total: 2 } });
   });
 
+  it("keeps reporting OMP spend as a partial log grows past the saved report", async () => {
+    const s = setup();
+    const path = s.write(A, [user("inspect"), assistant(1)]);
+    s.write(A, [assistant(1)], "stale-copy");
+    const missing = s.write(B, [assistant(2)]);
+    const thread = makeThreadResponse({ id: "thr_aaaaaaaa", providerId: "acp-omp", environmentId: "env_1", status: "active" });
+    const rows = [identityEvent(thread.id, A), identityEvent(thread.id, B)];
+    const host = experimental_createHostEntryHarness(createHostEntry({ dir: join(s.dir, "pi"), ompDir: s.dir }));
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "burn",
+      sdk: {
+        threads: { get: async () => thread, events: { list: listEvents(() => rows) } },
+        environments: { get: async () => ({ id: "env_1", hostId: "host_1" }) },
+        hosts: { list: async () => [{ id: "host_1", status: "connected" }] },
+      },
+      experimental_callHostRpc: ({ method, input }) => host.experimental_call(method as "reports", input as never),
+    });
+    const source = createReportSource(bb, { onChange: () => {} });
+    const report = async () => (await source.reportsOf([thread.id])).get(thread.id)?.report;
+    const changed = (sequence: number) => harness.behavior.emitThreadEvent("experimental_thread.events", { thread, sequence });
+    const append = (cost: number) => {
+      appendFileSync(path, line(assistant(cost)));
+      const at = new Date(Date.UTC(2026, 9, 18, 12, 0, cost));
+      utimesSync(path, at, at);
+    };
+    try {
+      const complete = await report();
+      expect(complete?.cost.total).toBe(3);
+      expect(complete?.coverage).not.toBe("partial");
+
+      rmSync(missing);
+      await changed(10);
+      expect(await report()).toMatchObject({ cost: { total: 3 }, coverage: "partial", coverageNote: expect.stringContaining("last saved") });
+
+      append(2);
+      await changed(11);
+      expect(await report()).toMatchObject({ cost: { total: 3 }, coverage: "partial", coverageNote: expect.stringContaining("some recorded sessions") });
+
+      append(4);
+      await changed(12);
+      expect(await report()).toMatchObject({ calls: 3, cost: { total: 7 }, coverage: "partial" });
+
+      append(8);
+      await changed(13);
+      expect(await report()).toMatchObject({ calls: 4, cost: { total: 15 }, coverage: "partial" });
+
+      rmSync(path);
+      await changed(14);
+      expect(await report()).toMatchObject({ cost: { total: 15 }, coverage: "partial", coverageNote: expect.stringContaining("last saved") });
+    } finally {
+      source.dispose();
+      await host.experimental_dispose();
+      await harness.lifecycle.dispose();
+    }
+  });
+
   it("replaces BB cost-only events with session metrics and refreshes during an active turn", async () => {
     const s = setup();
     const path = s.write(A, [user("inspect"), assistant(1), assistant(2)]);
