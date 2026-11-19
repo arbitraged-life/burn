@@ -4,6 +4,16 @@ Notable changes to Burn, newest first.
 
 Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on are tagged `vX.Y.Z` in this repository; earlier versions were not tagged. Each release's commit message has the full detail, including how the release was checked.
 
+## Unreleased
+
+- Read OMP (`acp-omp`) native session logs instead of showing BB's cumulative cost with zero model calls and tokens. Recover recorded token/cache/reasoning breakdowns, request durations and per-prompt tool counts without adding the same cost twice.
+- Accept OMP title metadata before the session header, match exact session identities, exclude copied fork history, refresh during active turns and preserve saved figures when logs disappear.
+- Resolve duplicate OMP session files by complete parsed history, then modification time, rather than pathname order. A stale copy no longer hides new calls and tokens appended to the active log, including when retained histories reach the entry cap.
+- Clarify that Calls counts model requests rather than tool executions, and include OMP in timing coverage.
+- Include OMP `model_usage` side calls and blocking task-result usage in all spend totals without counting supplemental usage as extra assistant calls or charging it twice.
+- Cache discovered OMP paths atomically, rediscover missing or moved logs, and isolate unreadable session buckets so they cannot stall other threads or harnesses. Incomplete discoveries and unreadable known copies remain partial; failed discovery retries instead of permanently caching a stale fallback.
+- Expire complete OMP path discovery after one minute on demand, so a fuller session copy created after a warm read is discovered even while the original file remains. Warm reads do not prolong the deadline or enumerate the history tree; duplicate copies still count once.
+
 ## 0.10.0 - 2026-11-18
 
 A budget in bb can now cover a whole thread family. Burn also restores usage figures for OpenCode 2 threads and prices Claude Fable 5.2 and GPT-6.1 Terra.
