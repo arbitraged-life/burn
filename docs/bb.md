@@ -25,6 +25,8 @@ Elsewhere in bb:
 
 The Burn tab in the thread's side panel lists every prompt with its cost, and adds the cost of the thread's child threads. It also holds the thread's budget. Beside the totals, **Speed** gives the thread's output tokens per second over its timed calls, and each prompt's details and the models list give their own. With a discount set, a **With discounts · List price** switch at the top shows the same thread at list price, to compare.
 
+The chip and panel count the descendants and workflow workers Burn finds, including archived and hidden threads. If some children have no recorded usage, the total says how many it covers, for example “with 60 of 115 child threads.” The detail list shows at most the 50 highest-cost children, but the total includes recorded usage outside that list.
+
 ![The Burn tab: totals, every prompt's cost, and the thread with its child](../assets/screenshots/bb-panel.png)
 
 ## The Burn page

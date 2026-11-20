@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from "react";
 import { formatAmount, isTokenOnly } from "../../src/format.js";
 import type { AgentUsage } from "../../src/report.js";
 import type { UsageAnswer } from "./contract.js";
+import { childUsageCount } from "./family.js";
 
 export function agentTotal(agents: AgentUsage | undefined): number {
   return agents?.rows.reduce((n, a) => n + a.cost.total, 0) ?? 0;
@@ -31,7 +32,7 @@ export function CostBreakdown({ answer, children, scope = "combined" }: { answer
   const { report, family } = answer;
   if (!report || isTokenOnly(report)) return children;
   const hasOwnAgents = !!report.agents?.rows.length;
-  const hasChildren = family.children.length > 0;
+  const hasChildren = family.reportedChildCount > 0;
   const canExpand = scope === "thread" ? hasOwnAgents : scope === "family" ? hasChildren : hasOwnAgents || hasChildren;
   if (!canExpand) return children;
   const ownAgents = agentTotal(report.agents);
@@ -47,8 +48,8 @@ export function CostBreakdown({ answer, children, scope = "combined" }: { answer
       </> : report.agents?.rows.length ? row("Subagents (known portion)", agentLabel(report.agents)) : null}
       </> : null}
       <span className={scope === "family" || !hasOwnAgents ? "block" : "mt-1 block border-t border-border pt-1"}>{row("This thread", formatAmount(report.cost.total, report.estimated))}</span>
-      {scope !== "thread" && family.children.length > 0 ? <>
-        {row(family.children.length < 50 ? `Child threads · ${family.children.length}` : "Child threads", formatAmount(Math.max(0, family.total - report.cost.total), family.estimated))}
+      {scope !== "thread" && hasChildren ? <>
+        {row(`Child threads · ${childUsageCount(family)}`, formatAmount(Math.max(0, family.total - report.cost.total), family.estimated))}
         <span className="mt-1 block border-t border-border pt-1 font-semibold [&_b]:font-semibold">{row("Total with children", formatAmount(family.total, family.estimated))}</span>
       </> : null}
       {scope !== "family" && report.agents?.coverage !== "available" && !!report.agents?.rows.length ? <span className="mt-1 block text-[11px] text-muted-foreground">Agent breakdown is incomplete; known agents are already in these totals.</span> : null}

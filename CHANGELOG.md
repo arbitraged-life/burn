@@ -4,15 +4,20 @@ Notable changes to Burn, newest first.
 
 Burn follows [semantic versioning](https://semver.org). Releases from 0.4.0 on are tagged `vX.Y.Z` in this repository; earlier versions were not tagged. Each release's commit message has the full detail, including how the release was checked.
 
-## Unreleased
+## 0.11.0 - 2026-11-20
 
-- Read OMP (`acp-omp`) native session logs instead of showing BB's cumulative cost with zero model calls and tokens. Recover recorded token/cache/reasoning breakdowns, request durations and per-prompt tool counts without adding the same cost twice.
-- Accept OMP title metadata before the session header, match exact session identities, exclude copied fork history, refresh during active turns and preserve saved figures when logs disappear.
-- Resolve duplicate OMP session files by complete parsed history, then modification time, rather than pathname order. A stale copy no longer hides new calls and tokens appended to the active log, including when retained histories reach the entry cap.
-- Clarify that Calls counts model requests rather than tool executions, and include OMP in timing coverage.
-- Include OMP `model_usage` side calls and blocking task-result usage in all spend totals without counting supplemental usage as extra assistant calls or charging it twice.
-- Cache discovered OMP paths atomically, rediscover missing or moved logs, and isolate unreadable session buckets so they cannot stall other threads or harnesses. Incomplete discoveries and unreadable known copies remain partial; failed discovery retries instead of permanently caching a stale fallback.
-- Expire complete OMP path discovery after one minute on demand, so a fuller session copy created after a warm read is discovered even while the original file remains. Warm reads do not prolong the deadline or enumerate the history tree; duplicate copies still count once.
+Burn now reads detailed usage from native OMP sessions in bb, estimates the cost of GPT-6.2 Sol and Astra in Codex, and shows the full child-thread count for large families.
+
+- **OMP threads show calls, tokens, and timing, not just cost.** Burn reads the native session logs to show model calls, cache and reasoning tokens, request durations, and per-prompt tool counts. It includes recorded side calls and blocking task usage without charging twice or counting them as extra assistant calls. Only standard OMP session directories are supported. ([#13](https://github.com/kalindudc/burn/pull/13))
+- **Partial OMP history no longer replaces a higher saved total.** Burn counts duplicate copies once, favors the fullest history, and rediscovers copies without scanning on every read. If some history is unavailable, the report stays marked partial. Burn keeps the saved report when it contains more spend but lets a growing partial log increase the total. ([#13](https://github.com/kalindudc/burn/pull/13), [follow-up](https://github.com/kalindudc/burn/commit/b64a6c12c161904a226440a8ba92044974693d79))
+- **GPT-6.2 Sol and Astra show cost estimates in Codex.** Burn uses OpenAI's standard API rates, including the higher rates for requests over 272,000 input tokens. These are list-price estimates, not subscription charges. ([#21](https://github.com/kalindudc/burn/issues/21), [#22](https://github.com/kalindudc/burn/pull/22))
+- **Large thread families show their full count.** The Burn card and panel distinguish children with recorded usage from the full family. The detail list still shows up to 50 children, ordered by cost. The total already included recorded usage beyond those rows and has not changed.
+- **A clearer contributing guide.** It explains how to report bugs, propose focused fixes, and verify a change before opening a pull request. ([guide update](https://github.com/kalindudc/burn/commit/92c8a9c9a665517d78ebccf256a9743bec6943b9))
+
+### Contributors
+
+- [@arbitraged-life](https://github.com/arbitraged-life) contributed native OMP usage and session discovery ([#13](https://github.com/kalindudc/burn/pull/13)).
+- [@moskvini](https://github.com/moskvini) reported the missing GPT-6.2 prices and added them ([#21](https://github.com/kalindudc/burn/issues/21), [#22](https://github.com/kalindudc/burn/pull/22)).
 
 ## 0.10.0 - 2026-11-18
 

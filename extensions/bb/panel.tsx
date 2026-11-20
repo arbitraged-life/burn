@@ -19,6 +19,7 @@ import { BudgetEditor } from "./budget-editor.js";
 import { BudgetStatus, CopyAction, EstimatedNote, Label, Models, StoppedNotice, WaitingNotice, WhereItWent } from "./card.js";
 import { MiniBars } from "./charts.js";
 import type { Family, UsageAnswer } from "./contract.js";
+import { childUsageCount } from "./family.js";
 import { cn } from "./lib/utils.js";
 import { readPrefs } from "./prefs.js";
 import { copySummary } from "./summary.js";
@@ -45,21 +46,20 @@ function Kpis({ answer, report, atList }: { answer: UsageAnswer; report: UsageRe
   const tokenOnly = isTokenOnly(report);
   const own = report.cost.total;
   const { family, budget } = answer;
-  const kids = family.children.length;
   const fromKids = family.total - own;
   const speed = reportOutputPerSec(report);
   const share = budget !== null && !tokenOnly ? `${Math.round(((budget.includeChildren ? family.total : own) / budget.amount) * 100)}% of ${formatBudget(budget.amount)} budget${budget.includeChildren ? " including children" : ""}` : "No budget";
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-2" data-testid="kpis">
       <Kpi label="This thread" value={<CostBreakdown answer={answer} scope="thread">{usageLabel(report)}</CostBreakdown>} sub={atList ? "At list price" : share} />
-      {kids > 0 ? (
+      {family.reportedChildCount > 0 ? (
         <Kpi
-          label={`With ${kids} ${kids === 1 ? "child" : "children"}`}
+          label={`With ${childUsageCount(family)} ${family.childCount === 1 ? "child" : "children"}`}
           value={<CostBreakdown answer={answer} scope="family">{formatAmount(family.total, family.estimated)}</CostBreakdown>}
           sub={`+${formatUsd(fromKids)} in children (${family.total > 0 ? Math.round((fromKids / family.total) * 100) : 0}%)`}
         />
       ) : (
-        <Kpi label="Children" value="None" sub="No child thread has reported" />
+        <Kpi label="Children" value={family.childCount || "None"} sub="No child thread has reported" />
       )}
       <Kpi label="With agents" value={agentLabel(family.agents)} sub={family.agents?.rows.length ? `${family.agents.count ?? family.agents.rows.length} subagents · part of the totals above${family.agents.coverage === "partial" ? " · partial" : ""}` : family.agents?.coverage === "available" ? "No saved subagent usage" : "Source has no complete agent breakdown"} />
       <Kpi
@@ -240,6 +240,11 @@ function FamilyList({ answer, report, onOpen }: { answer: UsageAnswer; report: U
   return (
     <section>
       <Label aside="live">This thread and its children</Label>
+      {family.reportedChildCount > family.children.length ? (
+        <p className="mb-1.5 text-[11px] text-muted-foreground">
+          Showing {family.children.length} of {family.reportedChildCount} child threads with usage, ordered by cost.
+        </p>
+      ) : null}
       <div className="overflow-hidden rounded-lg border border-border text-[12.5px]" data-testid="family">
         <div className={row}>
           <Dot running={report.running} />

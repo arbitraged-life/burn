@@ -20,7 +20,7 @@ it('keeps agent spend inside report totals and discounts its token kinds exactly
 it('opens the calculation on hover or focus, closes on Escape, and includes child-native spend once in the child total', () => {
  const r=buildReport([assistant(3), {...assistant(2),agentId:'root-agent'}],null);
  r.agents!.coverage='available';
- const a=answer({report:r,family:{total:10,calls:4,estimated:false,children:[{threadId:'thr_child000',title:'Worker',cost:5,calls:2,running:false,model:null,estimated:false}],agents:{coverage:'available',rows:[...r.agents!.rows,{...r.agents!.rows[0]!,id:'child-agent',cost:{input:1,output:0,cacheRead:0,cacheWrite:0,total:1}}]}}});
+ const a=answer({report:r,family:{total:10,calls:4,estimated:false,childCount:1,reportedChildCount:1,children:[{threadId:'thr_child000',title:'Worker',cost:5,calls:2,running:false,model:null,estimated:false}],agents:{coverage:'available',rows:[...r.agents!.rows,{...r.agents!.rows[0]!,id:'child-agent',cost:{input:1,output:0,cacheRead:0,cacheWrite:0,total:1}}]}}});
  const ui=render(<CostBreakdown answer={a} scope="family">$10.00</CostBreakdown>);
  expect(ui.queryByRole('tooltip')).toBeNull();
  fireEvent.mouseEnter(ui.getByRole('button').parentElement!);
@@ -44,7 +44,7 @@ for (const coverage of ["available", "partial"] as const) {
  it(`omits the entire child section without BB children (${coverage} native coverage)`, () => {
   const report=buildReport([assistant(3), {...assistant(2),agentId:'native'}],null);
   report.agents!.coverage=coverage;
-  const a=answer({report,family:{total:5,calls:2,estimated:false,children:[],agents:report.agents}});
+  const a=answer({report,family:{total:5,calls:2,estimated:false,childCount:0,reportedChildCount:0,children:[],agents:report.agents}});
   const ui=render(<CostBreakdown answer={a}>$5.00</CostBreakdown>);
   const button=ui.getByRole('button', {name:'Cost calculation'});
   expect(button.className).toContain('decoration-dotted');
@@ -58,6 +58,8 @@ for (const coverage of ["available", "partial"] as const) {
 }
 it('keeps the child section when a reported child has zero cost', () => {
  const a=answer();
+ a.family.childCount=1;
+ a.family.reportedChildCount=1;
  a.family.children=[{threadId:'thr_child000',title:'Worker',cost:0,calls:0,running:false,model:null,estimated:false}];
  const ui=render(<CostBreakdown answer={a} scope="family">$4.82</CostBreakdown>);
  fireEvent.focus(ui.getByRole('button'));
@@ -67,6 +69,8 @@ it('keeps the child section when a reported child has zero cost', () => {
 
 it('shows the same subtotal and family total from the own-thread amount', () => {
  const a=answer();
+ a.family.childCount=1;
+ a.family.reportedChildCount=1;
  a.family.children=[{threadId:'thr_child000',title:'Worker',cost:9,calls:1,running:false,model:null,estimated:false}];
  a.family.total=13.82;
  const ui=render(<CostBreakdown answer={a}>$4.82</CostBreakdown>);
@@ -91,6 +95,8 @@ it('keeps the thread detail calculation free of child totals', () => {
  const report=buildReport([assistant(3), {...assistant(2),agentId:'native'}],null);
  report.agents!.coverage='available';
  const a=answer({report});
+ a.family.childCount=1;
+ a.family.reportedChildCount=1;
  a.family.children=[{threadId:'thr_child000',title:'Worker',cost:9,calls:1,running:false,model:null,estimated:false}];
  a.family.total=14;
  const ui=render(<CostBreakdown answer={a} scope="thread">$5.00</CostBreakdown>);
@@ -110,7 +116,7 @@ for (const state of ['missing','empty','partial-empty','known','partial'] as con
     const report=buildReport([assistant(5)],null);
     report.agents=state==='missing' ? undefined : {coverage:state.startsWith('partial') ? 'partial' : 'available',rows:state==='known'||state==='partial' ? [nativeRow] : []};
     const children=childState==='none' ? [] : [{threadId:'thr_child000',title:'Worker',cost:5,calls:2,running:false,model:null,estimated:false,agents:{coverage:'available' as const,rows:childState==='native' ? [{...nativeRow,id:'child-native'}] : []}}];
-    const a=answer({report,family:{total:children.length ? 10 : 5,calls:3,estimated:false,children,agents:{coverage:'available',rows:children.flatMap(c=>c.agents.rows)}}});
+    const a=answer({report,family:{total:children.length ? 10 : 5,calls:3,estimated:false,childCount:children.length,reportedChildCount:children.length,children,agents:{coverage:'available',rows:children.flatMap(c=>c.agents.rows)}}});
     const own=state==='known'||state==='partial';
     const kids=childState!=='none';
     const expandable=scope==='thread' ? own : scope==='family' ? kids : own||kids;
